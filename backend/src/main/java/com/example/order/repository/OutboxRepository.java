@@ -14,5 +14,8 @@ public interface OutboxRepository extends JpaRepository<OutboxEvent, String> {
     /** Oldest-first pending rows, for the relay to drain. */
     List<OutboxEvent> findByStatusOrderByIdAsc(OutboxStatus status);
 
+    /** Most-recently-published events first (for the UI event stream). */
+    List<OutboxEvent> findTop20ByStatusOrderByIdDesc(OutboxStatus status);
+
     Optional<OutboxEvent> findByAggregateIdAndEventType(String aggregateId, String eventType);
 }

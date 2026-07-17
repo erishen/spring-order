@@ -24,6 +24,22 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  getOrders: () =>
+    request<import('../types').OrderResponse[]>('/api/orders'),
+
+  getEvents: () =>
+    request<import('../types').EventView[]>('/api/events'),
+
   getUsers: () =>
     request<import('../types').User[]>('/api/users'),
+
+  // Raw actuator endpoints (no JSON envelope) — proxied by vite/dev and the
+  // frontend nginx in prod. Used by the runtime-status page.
+  getInstanceInfo: () => request<import('../types').InstanceInfo>('/actuator/info'),
+
+  getPrometheus: async () => {
+    const res = await fetch(`${API_BASE_URL}/actuator/prometheus`, { headers: { Accept: 'text/plain' } });
+    if (!res.ok) throw { status: res.status, message: res.statusText };
+    return res.text();
+  },
 };

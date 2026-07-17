@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
 import { OrderPage } from './pages/OrderPage';
 import { UsersPage } from './pages/UsersPage';
+import { StatusPage } from './pages/StatusPage';
 import './App.css';
 
 export function App() {
@@ -21,6 +22,11 @@ export function App() {
                   用户
                 </NavLink>
               </li>
+              <li>
+                <NavLink to="/status" className={({ isActive }) => isActive ? 'active' : ''}>
+                  运行态
+                </NavLink>
+              </li>
             </ul>
           </nav>
         </header>
@@ -29,6 +35,7 @@ export function App() {
           <Routes>
             <Route path="/" element={<OrderPage />} />
             <Route path="/users" element={<UsersPage />} />
+            <Route path="/status" element={<StatusPage />} />
           </Routes>
         </main>
       </div>
