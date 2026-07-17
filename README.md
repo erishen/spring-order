@@ -26,9 +26,14 @@
 | 后端 | Spring Boot 3.2.5 · Java 17 · Maven · Lombok |
 | 前端 | React 18 · TypeScript · Vite 5 · React Router 6 |
 | 开发态 Mock | MSW 2.4（Mock Service Worker） |
-| 测试 | JUnit 5 · Mockito · `@WebMvcTest` / `@SpringBootTest` · JaCoCo（覆盖率门禁 80%） |
+| 测试 | JUnit 5 · Mockito · `@WebMvcTest` / `@SpringBootTest` · EmbeddedKafka（`spring-kafka-test`）· JaCoCo（覆盖率门禁 80%） |
 | 存储 | Spring Data JPA + Flyway + H2（文件型，零依赖）/ PostgreSQL（`postgres` profile）· 库存 `@Version` 乐观锁 |
-| 迁移 | Flyway（`V1__init.sql`，H2 / PostgreSQL 兼容） |
+| 缓存 / 分布式锁 | Redis（`spring-boot-starter-data-redis`）+ `RedisLockService`（SET NX PX + Lua 解锁）+ `RedisCacheManager`，仅 `redis` profile 启用 |
+| 消息 / 事件 | Kafka（`spring-kafka`）+ 事务发件箱 Outbox（`OutboxService` / `OutboxRelay`），仅 `kafka` profile 启用 |
+| 可靠性 | Resilience4j（限流 / 熔断 / 重试）+ `Idempotency-Key` 幂等表（JPA，零外部依赖） |
+| 可观测 | Actuator + Micrometer（`micrometer-registry-prometheus`），暴露 `/actuator/prometheus` |
+| 网关 / 编排 | nginx 负载均衡 + Docker Compose 多实例全栈（`backend/Dockerfile` 多阶段镜像） |
+| 迁移 | Flyway：`V1__init.sql`（订单 / 库存）、`V2__idempotency.sql`（幂等键）、`V3__outbox.sql`（发件箱），H2 / PostgreSQL 兼容 |
 
 包命名空间：`com.example.order`（Java 示例占位约定，未作改动）。
 
@@ -37,26 +42,42 @@
 ```
 order-platform/
 ├── Makefile                 # 常用命令封装（install / run / test / ci ...）
+├── docker-compose.yml       # 全栈编排：order-svc 副本 + redis + postgres + kafka + nginx + prometheus + grafana
 ├── backend/                 # Spring Boot 后端
 │   ├── pom.xml
+│   ├── Dockerfile           # 多阶段：maven 构建 → eclipse-temurin JRE
 │   └── src/main/java/com/example/order/
-│       ├── controller/      # OrderController, UserController
-│       ├── service/         # OrderService, PromotionService
+│       ├── controller/      # OrderController（含 Idempotency-Key 头）, UserController, EventController
+│       ├── service/         # OrderService, PromotionService, InventoryService
+│       │                   # RedisLockService, IdempotencyService, OutboxService
+│       │                   # OutboxRelay, OrderEventLogger（Kafka 消费示例）
 │       ├── dto/             # 请求/响应模型（含促销信封）
-│       ├── model/           # Order, Inventory, User, CartItem
-│       ├── exception/       # 全局异常处理 + 自定义异常（含乐观锁冲突 409）
+│       ├── model/           # Order, Inventory, User, CartItem, IdempotencyRecord, OutboxEvent
+│       ├── exception/       # 全局异常处理 + 自定义异常（乐观锁 409 / 幂等冲突 409 / 限流 429 / 熔断 503）
 │       └── resources/
-│           ├── application.yml            # 默认：内嵌 H2 文件库 + Flyway + H2 Console
+│           ├── application.yml            # 默认：H2 文件库 + Flyway + Actuator/Prometheus
 │           ├── application-postgres.yml   # postgres profile
-│           └── db/migration/V1__init.sql  # 建 orders / inventory 表 + 种子库存
-└── frontend/                # React/Vite 前端
+│           ├── application-redis.yml      # redis profile（分布式锁 + 缓存）
+│           ├── application-kafka.yml      # kafka profile（Outbox 中继 + topic）
+│           └── db/migration/
+│               ├── V1__init.sql           # 建 orders / inventory 表 + 种子库存
+│               ├── V2__idempotency.sql    # 幂等键表
+│               └── V3__outbox.sql         # 发件箱事件表
+├── conf/nginx.conf          # 网关：多副本轮询 + 被动健康检查，对外 :80
+├── prometheus/prometheus.yml# 抓取两副本 /actuator/prometheus
+├── grafana/provisioning/... # Prometheus 数据源（admin/admin）
+├── scripts/                 # load-test.js (k6) + load-test.py (locust) 压测
+└── frontend/                # React/Vite 前端（已容器化，见 P4）
+    ├── Dockerfile           # 单阶段：nginx 托管预编译 dist，代理 /api /actuator → 网关
+    ├── nginx.conf           # 容器内 nginx：SPA history 回退 + 反代后端
+    ├── .dockerignore        # 排除 node_modules/src，仅 COPY dist
     ├── src/
-    │   ├── api/client.ts    # fetch 封装
-    │   ├── mocks/           # MSW handlers / server / browser
+    │   ├── api/client.ts    # fetch 封装（含 getOrders / getEvents / getInstanceInfo / getPrometheus）
+    │   ├── mocks/           # MSW handlers / server / browser（仅 DEV）
     │   ├── components/      # OrderForm, UserList
-    │   ├── pages/           # OrderPage, UsersPage
+    │   ├── pages/           # OrderPage（下单 + 订单列表）, UsersPage, StatusPage（运行态）
     │   └── types/index.ts   # 前端类型（与后端契约对齐）
-    ├── vite.config.ts       # 端口 3000 + /api 代理 8080
+    ├── vite.config.ts       # 端口 3000 + /api + /actuator 代理 8080
     └── package.json
 ```
 
@@ -136,6 +157,7 @@ POST /api/orders
 
 **新用户判定**：若该 `userId` 在数据库（`orders` 表）中无任何历史订单，则视为新用户（首单）。
 **库存校验**：由 `InventoryService` 基于 `inventory` 表 + `@Version` 乐观锁完成；不足时返回 `400 Insufficient Stock`。旧契约里的 `availableStock` 客户端字段已移除——可用库存改为服务端托管状态。
+**幂等头（可选）**：`POST /api/orders` 还接受请求头 `Idempotency-Key`（唯一字符串）。同 key 重复提交命中已完成记录→回放首次响应 `200`；并发提交→`409`；业务失败→释放该 key 可安全重试。详见 [§10 P2](#p2--可靠性幂等--resilience4j当前已落地)。
 
 成功返回 **201 Created**，`Location` 头指向新订单，响应体为 `{ order, promotion }` 信封：
 
@@ -172,6 +194,37 @@ GET /api/orders             # 订单列表
 |------|------|------|
 | 400 | 参数校验失败 / 库存不足 | 校验注解报错或 `InsufficientStockException` |
 | 404 | 订单不存在 | `OrderNotFoundException`（消息不含 id，避免信息泄露） |
+| 409 | 乐观锁冲突 / 幂等键进行中 | `OptimisticLockingFailureException`（并发扣库存重试仍冲突）→ 409；`IdempotencyConflictException`（同 key 并发提交）→ 409 |
+| 429 | 限流触发 | Resilience4j `@RateLimiter`（`orderCreate` 实例，默认 10/s）→ `RequestNotPermitted` → 429 |
+| 503 | 熔断器开闸 | Resilience4j `@CircuitBreaker` 开闸 → `CallNotPermittedException` → 503 |
+
+### 5.5 订单事件流（P3 Outbox）
+
+```
+GET /api/events        # 最近已发布（PUBLISHED）的 outbox 事件，最多 20 条
+```
+
+返回经 Outbox 中继投递到 Kafka `order-events` topic 的事件，前端「运行态」页用它渲染事件流：
+
+```json
+[
+  {
+    "id": "9f2c...",
+    "eventType": "OrderCreated",
+    "aggregateId": "b1f0c2...",
+    "status": "PUBLISHED",
+    "createdAt": "2026-07-17T09:00:00",
+    "publishedAt": "2026-07-17T09:00:01"
+  }
+]
+```
+
+### 5.6 运行态信息（P4）
+
+```
+GET /actuator/info     # 含 instanceId（当前响应副本主机名），演示网关轮询
+GET /actuator/prometheus  # 原始指标文本，前端解析 HTTP 请求数 / 延迟 / 熔断调用
+```
 
 ## 6. 促销规则（Q6）
 
@@ -259,9 +312,10 @@ make ci                      # = test + coverage-check（模拟 CI 流水线，Q
 |----------|------------|----------|
 | `ConcurrentHashMap` 内存存储，重启即丢 | 共享持久化（Postgres）+ 多实例无状态 | ✅ **P0 已实现** |
 | 库存读后判断（超卖风险） | DB 乐观锁（`@Version`）+ 重试，杜绝超卖 | ✅ **P0 已实现** |
+| 单实例，并发=单机 | 多实例 + Redis 分布式锁/缓存 | ✅ **P1 已实现** |
 | 无幂等，网关重试会重复下单 | `Idempotency-Key` 幂等 + Resilience4j 限流/熔断/重试 | ✅ **P2 已实现** |
-| 单实例，并发=单机 | 多实例 + Redis 分布式锁/缓存 + API 网关 | ✅ **P1 已实现** |
 | 下单同步耦合 | 订单事件上 Kafka（Outbox 模式）解耦库存/支付/通知 | ✅ **P3 已实现** |
+| 单入口 + 可观测 | nginx 网关负载均衡 + Actuator/Prometheus/Grafana 监控 | ✅ **P4 已实现** |
 
 ### P0 · 持久化地基（当前已落地）
 
@@ -326,9 +380,28 @@ make ci                      # = test + coverage-check（模拟 CI 流水线，Q
   ```
 - **测试**：`OutboxServiceTest`（默认 profile 无 Kafka，验证 PENDING 写入 + markPublished 翻转，纯 DB）；`OutboxIntegrationTest`（`@SpringBootTest` + `spring-kafka-test` 的 **EmbeddedKafka** 内嵌真实 broker，无需 Docker，验证 PENDING 行被中继发出、示例消费者收到、行翻 PUBLISHED）。
 
-### 后续路线（规划中，未实现）
+### P4 · 多实例演示：网关 + 监控（当前已落地）
 
-- **P4 多实例演示**：`docker-compose` 拉起 2+ order-svc + Redis + Postgres + Kafka + 网关，配 Micrometer / OpenTelemetry 链路追踪，演示水平扩展与压测。
+把 P0–P3 的所有能力在「真正多实例」下串起来，演示水平扩展与可观测性：
+
+- **多实例 + 网关**：根目录 `docker-compose.yml` 一键拉起 **2 个 order-svc 副本**（`order-svc-1` / `order-svc-2`），共享同一 Redis + Postgres + Kafka（对应 P1 锁/缓存、P0 持久化、P3 Outbox），前面由 **nginx 网关**（`conf/nginx.conf`）轮询负载均衡，对外单一入口 `:80`。`backend/Dockerfile` 多阶段镜像化，`docker compose up -d --build` 起全栈。
+- **前端 UI 容器**：`frontend/` 已容器化——`frontend/Dockerfile` 用 nginx 托管预编译 `dist`，并把 `/api` 与 `/actuator` 反代到网关（同源、无 CORS）。全栈起来后多一个 `frontend` 服务（默认 `:18083`，避开本机 80/3000 冲突），直接浏览器打开即可用完整 UI 演示 P1–P4：订单页（下单 + 订单列表，列表走 Redis `@Cacheable`）、用户页、**运行态页（`/status`）**——展示当前响应副本（`/actuator/info` 的 `instanceId`，多次刷新可见网关轮询到不同副本）、HTTP 指标（解析 `/actuator/prometheus`）、以及最近 Kafka 订单事件流（`GET /api/events`）。
+- **可观测性**：新增 `spring-boot-starter-actuator` + `micrometer-registry-prometheus`，`/actuator/prometheus` 暴露 JVM/HTTP/Resilience4j 指标；`prometheus/prometheus.yml` 分别抓取两副本，`grafana/provisioning` 注入 Prometheus 数据源（admin/admin）。Prometheus `targets` 可见两副本被分别抓取，Grafana 按实例标签拆分，直观看到网关把流量摊到两副本。
+- **健康指示器坑（已修）**：`data-redis` 在 classpath 上会让 Spring Boot 自动注册 `RedisReactiveHealthIndicator`，**与 `RedisConfig` 的 `@ConditionalOnProperty` 无关**——无 Redis 时它恒 ping `localhost:6379` 失败，导致顶层 `/actuator/health` 误报 `DOWN`（liveness/readiness 不受影响）。已在默认 `application.yml` 关掉 `management.health.redis.enabled`，仅 `redis` profile 开启；无中间件时 health 正确为 `UP`。
+- **降级不变**：P4 只加「编排 + 监控」，不改运行时契约。副本仍只在 `redis,postgres,kafka` profile 连中间件；nginx 被动健康检查（3 次失败踢出 30s）保证单副本宕机网关仍可用；Actuator 端点默认暴露，供健康检查与抓取。
+- **一键全栈**：
+  ```bash
+  docker compose up -d --build
+  # 网关 :80 / 前端 UI :18083 / prometheus :9090 / grafana :3000
+  # 扩容：docker compose up -d --scale order-svc-1=2 --scale order-svc-2=2 --build
+  ```
+- **压测示例**（`scripts/load-test.js` 用 k6，`scripts/load-test.py` 用 locust）：
+  ```bash
+  k6 run -e BASE=http://localhost scripts/load-test.js
+  # 或
+  locust -f scripts/load-test.py --headless -u 50 -r 10 -t 1m -H http://localhost
+  ```
+  多副本 + 网关让压测 RPS 随副本数近线性提升；kill 单副本后网关自动剔除，流量不中断。
 
 ---
 
