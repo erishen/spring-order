@@ -388,7 +388,7 @@ make ci                      # = test + coverage-check（模拟 CI 流水线，Q
 - **前端 UI 容器**：`frontend/` 已容器化——`frontend/Dockerfile` 用 nginx 托管预编译 `dist`，并把 `/api` 与 `/actuator` 反代到网关（同源、无 CORS）。全栈起来后多一个 `frontend` 服务（默认 `:18083`，避开本机 80/3000 冲突），直接浏览器打开即可用完整 UI 演示 P1–P4：订单页（下单 + 订单列表，列表走 Redis `@Cacheable`）、用户页、**运行态页（`/status`）**——展示当前响应副本（`/actuator/info` 的 `instanceId`，多次刷新可见网关轮询到不同副本）、HTTP 指标（解析 `/actuator/prometheus`）、以及最近 Kafka 订单事件流（`GET /api/events`）。
 - **可观测性**：新增 `spring-boot-starter-actuator` + `micrometer-registry-prometheus`，`/actuator/prometheus` 暴露 JVM/HTTP/Resilience4j 指标；`prometheus/prometheus.yml` 分别抓取两副本，`grafana/provisioning` 注入 Prometheus 数据源（admin/admin）。Prometheus `targets` 可见两副本被分别抓取，Grafana 按实例标签拆分，直观看到网关把流量摊到两副本。
 - **健康指示器坑（已修）**：`data-redis` 在 classpath 上会让 Spring Boot 自动注册 `RedisReactiveHealthIndicator`，**与 `RedisConfig` 的 `@ConditionalOnProperty` 无关**——无 Redis 时它恒 ping `localhost:6379` 失败，导致顶层 `/actuator/health` 误报 `DOWN`（liveness/readiness 不受影响）。已在默认 `application.yml` 关掉 `management.health.redis.enabled`，仅 `redis` profile 开启；无中间件时 health 正确为 `UP`。
-- **降级不变**：P4 只加「编排 + 监控」，不改运行时契约。副本仍只在 `redis,postgres,kafka` profile 连中间件；nginx 被动健康检查（3 次失败踢出 30s）保证单副本宕机网关仍可用；Actuator 端点默认暴露，供健康检查与抓取。
+- **降级不变**：P4 只加「编排 + 监控」，不改运行时契约。副本仍只在 `redis,postgres,kafka` profile 连中间件；nginx 被动健康检查（3 次失败踢出 30s）保证单副本宕机网关仍可用；Actuator 仅暴露 health/info/prometheus（见 [§11](#11-安全加固security)），供健康检查与指标抓取。
 - **一键全栈**：
   ```bash
   docker compose up -d --build
@@ -402,6 +402,18 @@ make ci                      # = test + coverage-check（模拟 CI 流水线，Q
   locust -f scripts/load-test.py --headless -u 50 -r 10 -t 1m -H http://localhost
   ```
   多副本 + 网关让压测 RPS 随副本数近线性提升；kill 单副本后网关自动剔除，流量不中断。
+
+## 11. 安全加固（Security）
+
+本项目为面试演示，默认以「零配置可跑」为目标，但已做以下加固，避免把敏感信息提交进仓库或暴露不必要的端点：
+
+- **凭据不入库**：`docker-compose.yml` 中的数据库口令（`POSTGRES_PASSWORD` / `ORDER_DB_PASSWORD`）与 Grafana 管理员口令（`GF_SECURITY_ADMIN_*`）均改为 `${VAR:-默认值}` 插值。真实值放仓库根 `.env`（已被 `.gitignore` 忽略，**不会入库**）；模板见 `.env.example`（入库）。本地零配置执行 `docker compose up -d --build` 仍可用默认值直接跑。
+- **H2 控制台默认关闭**：`application.yml` 设 `spring.h2.console.enabled: false`；仅本地开发通过 `dev` profile（`application-dev.yml`）开启。容器/生产部署靠 `SPRING_PROFILES_ACTIVE` 覆盖，不会激活 `dev`，从而 H2 控制台保持关闭（避免暴露 DB 控制台端点）。
+- **Actuator 暴露面收紧**：默认仅暴露 `health` / `info` / `prometheus`（已去除 `metrics` 明细端点）；`health` 详情为 `when-authorized`。生产/对外部署在 `SPRING_PROFILES_ACTIVE` 追加 `prod`（`application-prod.yml`）后，Actuator 仅暴露 `health`，`prometheus`/`info` 走独立 management 端口（`9091`，docker-compose 不映射到宿主机），由受信内网的 Prometheus 直连抓取。
+- **CORS**：`WebConfig` 仅放行 `localhost:5173` / `localhost:3000`，未使用 `*` + `allowCredentials` 的危险组合。
+- **错误信息不泄露**：`OrderNotFoundException` 消息不含订单 id；`404` 不泄露资源存在性。
+
+> 注意：`grafana` 的 admin/admin、`order`/`order` 等均为 localhost 演示默认值，并非真实密钥。仓库公开前请将真实口令写入 `.env`，不要在 compose 中硬编码。
 
 ---
 

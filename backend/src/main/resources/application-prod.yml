@@ -1,0 +1,15 @@
+# 生产 / 对外部署加固（在 SPRING_PROFILES_ACTIVE 中追加 prod 启用，例如
+# SPRING_PROFILES_ACTIVE=redis,postgres,kafka,prod）：
+#   - Actuator 仅暴露 health 给网关做健康检查
+#   - prometheus / metrics 不对外暴露，由处于受信内网的 Prometheus 直连
+#     management 端口抓取
+#   - management 使用独立端口，docker-compose 不将其映射到宿主机
+# 注意：启用 prod 后前端运行态页将无法读取 /actuator/prometheus 与 /actuator/info，
+# 这属于预期（监控由 Prometheus/Grafana 承担，不暴露给公网 UI）。
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  server:
+    port: 9091

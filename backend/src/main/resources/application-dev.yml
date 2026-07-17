@@ -1,0 +1,7 @@
+# 本地默认 profile（由 application.yml 的 spring.profiles.default=dev 激活）。
+# 仅用于本地开发：开启 H2 控制台。容器/生产部署通过 SPRING_PROFILES_ACTIVE
+# 覆盖本项目，不会激活 dev，h2-console 因此保持关闭。
+spring:
+  h2:
+    console:
+      enabled: true

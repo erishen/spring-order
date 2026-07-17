@@ -22,7 +22,11 @@ spring:
     locations: classpath:db/migration
   h2:
     console:
-      enabled: true          # http://localhost:8080/h2-console
+      enabled: false         # 默认关闭；本地开发经 dev profile 开启（见 application-dev.yml）
+  # 本地默认激活 dev profile（开启 H2 控制台）。容器/生产部署通过
+  # SPRING_PROFILES_ACTIVE 覆盖，不会激活 dev，h2-console 保持关闭。
+  profiles:
+    default: dev
 
 # ---- P2: reliability (Resilience4j) ----
 resilience4j:
@@ -57,13 +61,14 @@ resilience4j:
           - com.example.order.exception.IdempotencyConflictException
 
 # ---- P4: Observability (Actuator + Prometheus) ----
-# Exposed for the multi-instance demo: health checks back the nginx upstream,
-# prometheus metrics feed the monitoring stack (see docker-compose + prometheus.yml).
+# 仅暴露 health/info/prometheus：health 供网关健康检查，prometheus 供监控栈抓取
+# （见 docker-compose + prometheus.yml），info 仅含 instanceId。metrics 明细端点已去除。
+# 生产部署见 application-prod.yml：仅暴露 health，prometheus 走独立 management 端口。
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,prometheus
   endpoint:
     health:
       show-details: when-authorized
