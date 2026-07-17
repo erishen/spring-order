@@ -4,6 +4,7 @@ import com.example.order.dto.OrderCreateRequest;
 import com.example.order.dto.OrderResponse;
 import com.example.order.dto.OrderWithPromotion;
 import com.example.order.dto.PromotionView;
+import com.example.order.service.IdempotencyService;
 import com.example.order.service.OrderService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,9 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -31,6 +35,9 @@ class OrderControllerTest {
 
     @MockBean
     private OrderService orderService;
+
+    @MockBean
+    private IdempotencyService idempotencyService;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -126,5 +133,65 @@ class OrderControllerTest {
         mockMvc.perform(get("/api/orders"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value("order-1"));
+    }
+
+    @Test
+    void createOrder_idempotentHit_replaysCachedWithoutCallingService() throws Exception {
+        OrderCreateRequest request = new OrderCreateRequest("user1", new BigDecimal("50.00"));
+        OrderResponse order = new OrderResponse(
+                "order-1", "user1", new BigDecimal("50.00"),
+                BigDecimal.ZERO, new BigDecimal("50.00"), "CREATED", LocalDateTime.now());
+        PromotionView promotion = new PromotionView(
+                new BigDecimal("50.00"), BigDecimal.ZERO, new BigDecimal("50.00"), "none");
+        OrderWithPromotion cached = new OrderWithPromotion(order, promotion);
+
+        when(idempotencyService.checkAndReserve("key-hit")).thenReturn(IdempotencyService.Outcome.HIT);
+        when(idempotencyService.getCached("key-hit")).thenReturn(cached);
+
+        mockMvc.perform(post("/api/orders")
+                        .header("Idempotency-Key", "key-hit")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.order.id").value("order-1"));
+
+        verify(orderService, never()).createOrder(any());
+    }
+
+    @Test
+    void createOrder_idempotentInProgress_returns409() throws Exception {
+        OrderCreateRequest request = new OrderCreateRequest("user1", new BigDecimal("50.00"));
+        when(idempotencyService.checkAndReserve("key-prog")).thenReturn(IdempotencyService.Outcome.IN_PROGRESS);
+
+        mockMvc.perform(post("/api/orders")
+                        .header("Idempotency-Key", "key-prog")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isConflict());
+
+        verify(orderService, never()).createOrder(any());
+    }
+
+    @Test
+    void createOrder_idempotentProceed_createsAndCompletes() throws Exception {
+        OrderCreateRequest request = new OrderCreateRequest("user1", new BigDecimal("50.00"));
+        OrderResponse order = new OrderResponse(
+                "order-1", "user1", new BigDecimal("50.00"),
+                BigDecimal.ZERO, new BigDecimal("50.00"), "CREATED", LocalDateTime.now());
+        PromotionView promotion = new PromotionView(
+                new BigDecimal("50.00"), BigDecimal.ZERO, new BigDecimal("50.00"), "none");
+        OrderWithPromotion response = new OrderWithPromotion(order, promotion);
+
+        when(idempotencyService.checkAndReserve("key-new")).thenReturn(IdempotencyService.Outcome.PROCEED);
+        when(orderService.createOrder(any(OrderCreateRequest.class))).thenReturn(response);
+
+        mockMvc.perform(post("/api/orders")
+                        .header("Idempotency-Key", "key-new")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.order.id").value("order-1"));
+
+        verify(idempotencyService).complete(eq("key-new"), any(OrderWithPromotion.class));
     }
 }

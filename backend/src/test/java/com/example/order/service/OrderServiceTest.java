@@ -6,6 +6,7 @@ import com.example.order.dto.PromotionResult;
 import com.example.order.exception.OrderNotFoundException;
 import com.example.order.model.Order;
 import com.example.order.repository.OrderRepository;
+import com.example.order.service.OutboxService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -31,6 +32,9 @@ class OrderServiceTest {
 
     @Mock
     private PromotionService promotionService;
+
+    @Mock
+    private OutboxService outboxService;
 
     @InjectMocks
     private OrderService orderService;

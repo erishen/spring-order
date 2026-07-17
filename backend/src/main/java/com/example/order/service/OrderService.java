@@ -13,9 +13,15 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
+import io.github.resilience4j.retry.annotation.Retry;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -27,25 +33,33 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final InventoryService inventoryService;
     private final PromotionService promotionService;
+    private final OutboxService outboxService;
 
     @Autowired(required = false)
     private RedisLockService lockService;
 
     public OrderService(OrderRepository orderRepository,
                         InventoryService inventoryService,
-                        PromotionService promotionService) {
+                        PromotionService promotionService,
+                        OutboxService outboxService) {
         this.orderRepository = orderRepository;
         this.inventoryService = inventoryService;
         this.promotionService = promotionService;
+        this.outboxService = outboxService;
     }
 
     /**
-     * Creates an order backed by JPA (no more in-memory map). Stock is reserved
-     * through {@link InventoryService}, which is optimistic-lock guarded so
-     * concurrent orders cannot oversell the same pool. When Redis is available,
-     * the deduction is also serialized by a distributed lock (per stockId) to
-     * reduce optimistic-lock retry storms under multi-instance contention.
+     * Creates an order backed by JPA. Stock is reserved through InventoryService
+     * (optimistic-lock guarded); when Redis is available the deduction is also
+     * serialized by a distributed lock (per stockId). On success the OrderCreated
+     * event is written to the transactional outbox in the SAME DB transaction as
+     * the order, then relayed to Kafka by OutboxRelay (at-least-once delivery,
+     * downstream consumers stay idempotent via the P2 Idempotency-Key).
      */
+    @Transactional
+    @RateLimiter(name = "orderCreate")
+    @CircuitBreaker(name = "orderCreate")
+    @Retry(name = "orderCreate")
     @CacheEvict(cacheNames = "orders-all", allEntries = true)
     public OrderWithPromotion createOrder(OrderCreateRequest request) {
         // "new user" is derived from real order history in the database.
@@ -68,6 +82,20 @@ public class OrderService {
         order.setDiscount(promotion.getDiscount());
         order.setFinalAmount(promotion.getFinalAmount());
         orderRepository.save(order);
+
+        // P3: write the OrderCreated event into the transactional outbox, in the
+        // same DB transaction as the order. OutboxRelay delivers it to Kafka later.
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("orderId", order.getId());
+        event.put("userId", order.getUserId());
+        event.put("amount", order.getAmount());
+        event.put("discount", order.getDiscount());
+        event.put("finalAmount", order.getFinalAmount());
+        event.put("status", order.getStatus());
+        if (order.getCreatedAt() != null) {
+            event.put("createdAt", order.getCreatedAt().toString());
+        }
+        outboxService.saveEvent("Order", order.getId(), "OrderCreated", event);
 
         return new OrderWithPromotion(toResponse(order), toView(request.getAmount(), promotion));
     }

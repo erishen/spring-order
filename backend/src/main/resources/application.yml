@@ -23,3 +23,35 @@ spring:
   h2:
     console:
       enabled: true          # http://localhost:8080/h2-console
+
+# ---- P2: reliability (Resilience4j) ----
+resilience4j:
+  ratelimiter:
+    instances:
+      orderCreate:
+        limit-for-period: 10
+        limit-refresh-period: 1s
+        timeout-duration: 0
+  circuitbreaker:
+    instances:
+      orderCreate:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        # expected business rejections must NOT count toward the failure rate
+        ignore-exceptions:
+          - com.example.order.exception.InsufficientStockException
+  retry:
+    instances:
+      orderCreate:
+        max-attempts: 3
+        wait-duration: 200ms
+        retry-exceptions:
+          - org.springframework.dao.OptimisticLockingFailureException
+          - org.springframework.dao.DataAccessException
+        ignore-exceptions:
+          - com.example.order.exception.InsufficientStockException
+          - com.example.order.exception.IdempotencyConflictException

@@ -259,9 +259,9 @@ make ci                      # = test + coverage-check（模拟 CI 流水线，Q
 |----------|------------|----------|
 | `ConcurrentHashMap` 内存存储，重启即丢 | 共享持久化（Postgres）+ 多实例无状态 | ✅ **P0 已实现** |
 | 库存读后判断（超卖风险） | DB 乐观锁（`@Version`）+ 重试，杜绝超卖 | ✅ **P0 已实现** |
-| 无幂等，网关重试会重复下单 | `Idempotency-Key` 幂等 + Resilience4j 限流/熔断 | 🔜 P2 规划 |
+| 无幂等，网关重试会重复下单 | `Idempotency-Key` 幂等 + Resilience4j 限流/熔断/重试 | ✅ **P2 已实现** |
 | 单实例，并发=单机 | 多实例 + Redis 分布式锁/缓存 + API 网关 | ✅ **P1 已实现** |
-| 下单同步耦合 | 订单事件上 Kafka（Outbox 模式）解耦库存/支付/通知 | 🔜 P3 规划 |
+| 下单同步耦合 | 订单事件上 Kafka（Outbox 模式）解耦库存/支付/通知 | ✅ **P3 已实现** |
 
 ### P0 · 持久化地基（当前已落地）
 
@@ -292,10 +292,42 @@ make ci                      # = test + coverage-check（模拟 CI 流水线，Q
   ```
 - **测试**：`RedisLockServiceTest`（mock StringRedisTemplate，纯单元验证加锁/解锁/Lua/降级，默认跑无需真 Redis）；`RedisP1IntegrationTest`（`@ActiveProfiles("redis")`，检测 localhost:6379 可达否则整体 skip，本地有 Docker 时验证锁串行化 + 缓存 bean 装配）。
 
+### P2 · 可靠性：幂等 + Resilience4j（当前已落地）
+
+让订单接口在「网络重试 / 网关重发 / 流量突增」下依然安全：
+
+- **幂等（`Idempotency-Key`）**：`POST /api/orders` 接受可选请求头 `Idempotency-Key`。服务端用 `idempotency_keys` 表（JPA 持久化，零外部依赖）记录每个 key 的状态：
+  - 同 key 的**第二次请求命中已完成记录** → 直接回放首次的 `OrderWithPromotion`（**200 OK**），不重复建单、不重复扣库存。
+  - 同 key 的并发请求**进行中（IN_PROGRESS）** → 返回 **409 Conflict**，阻止双重提交。
+  - 唯一约束 + 并发插入冲突兜底，保证多实例下同一 key 只会被一个请求处理。
+  - 业务失败（如库存不足 400）时**释放该 key**，客户端可用同一 key 安全重试（无副作用即不消耗幂等）。
+- **限流 / 熔断 / 重试（Resilience4j）**：`OrderService.createOrder` 加三件套注解，实例名 `orderCreate`：
+  - `@RateLimiter` 限流（默认 10 次/秒）→ 超限返回 **429 Too Many Requests**。
+  - `@CircuitBreaker` 熔断（COUNT_BASED 滑动窗口，失败率 50% 开闸 5s）→ 开闸返回 **503 Service Unavailable**；`InsufficientStockException` 等预期业务异常不计入失败率。
+  - `@Retry` 重试（最多 3 次）针对瞬时故障（`OptimisticLockingFailureException` / `DataAccessException`），跳过幂等冲突与库存不足。
+  - 三者通过 Spring AOP 织入，`RequestNotPermitted` / `CallNotPermittedException` 由 `GlobalExceptionHandler` 映射为 429 / 503。
+- **测试**：`IdempotencyServiceTest`（PROCEED / HIT / IN_PROGRESS / 并发插入冲突 / fail 全分支单测）；`OrderControllerTest` 新增幂等分支（HIT 回放不调 service、IN_PROGRESS 返 409、PROCEED 调 complete）；`IdempotencyIntegrationTest` 真实验证「同 key 只建单一次 + 库存只扣一次」；`RateLimitIntegrationTest`（调小 limit 验证 429）。
+
+### P3 · 事件驱动：Kafka + 事务发件箱 Outbox（当前已落地）
+
+让下单与下游（库存/支付/通知/审计）彻底解耦，且保证「落库 + 发消息」原子：
+
+- **事务发件箱（Transactional Outbox）**：`OrderService.createOrder` 在**同一个 DB 事务**里写完 `orders` 行后，立刻往 `outbox_events` 表写一条 `OrderCreated` 事件（`saveEvent` 用 REQUIRED，与订单同提交）。这样「状态已更新」和「事件已入队」永远不会不一致——要么都成功，要么都回滚。
+- **中继（OutboxRelay）**：`@ConditionalOnProperty(spring.kafka.bootstrap-servers)` 的定时任务（`fixedDelay` 默认 1s）扫描 `PENDING` 行，逐条 `kafkaTemplate.send` 到 `order-events` topic，成功后再 `markPublished`（REQUIRES_NEW 独立提交）。**at-least-once 投递**：若中继在「发送成功→标记完成」之间崩溃，该事件会被下次轮询重发——因此下游**必须幂等**（正好与 P2 的 `Idempotency-Key` 呼应）。发送失败的行保持 `PENDING`，下次重试，**事件绝不丢失**，即使 Kafka 临时宕机。
+- **优雅降级（关键）**：Kafka 是**可选基础设施**。仅在 `kafka` profile 下才连 broker、装配 `KafkaConfig` / `OutboxRelay` / 示例消费者 `OrderEventLogger`；默认/无 Kafka 时这些 Bean 根本不创建，`outbox_events` 行只是留 `PENDING`（待有 broker 时补发），**本地零依赖即可运行与测试**。
+- **下游消费者**：`OrderEventLogger` 是示例消费端（`@KafkaListener` 打印 `order-events`）。真实场景下可驱动履约、发通知、更新读模型等，且都以 `orderId` 为幂等键。
+- **启用方式**（需本地 Docker）：
+  ```bash
+  # 根目录 docker-compose.yml 起 Postgres + Redis + Kafka(KRaft 单节点)
+  docker compose up -d
+  # 多实例：都连同一 Redis + Postgres + Kafka
+  mvn -o spring-boot:run -Dspring-boot.run.arguments="--server.port=8080 --spring.profiles.active=redis,postgres,kafka"
+  mvn -o spring-boot:run -Dspring-boot.run.arguments="--server.port=8081 --spring.profiles.active=redis,postgres,kafka"
+  ```
+- **测试**：`OutboxServiceTest`（默认 profile 无 Kafka，验证 PENDING 写入 + markPublished 翻转，纯 DB）；`OutboxIntegrationTest`（`@SpringBootTest` + `spring-kafka-test` 的 **EmbeddedKafka** 内嵌真实 broker，无需 Docker，验证 PENDING 行被中继发出、示例消费者收到、行翻 PUBLISHED）。
+
 ### 后续路线（规划中，未实现）
 
-- **P2 可靠性**：`POST /api/orders` 加 `Idempotency-Key` 幂等 + Resilience4j 限流/熔断/重试。改动小、面试高频，不依赖外部中间件。
-- **P3 事件驱动**：订单创建后发领域事件到 Kafka，解耦库存/支付/通知；用 Outbox 模式保证「落库 + 发消息」原子。需 Docker 跑 Kafka。
 - **P4 多实例演示**：`docker-compose` 拉起 2+ order-svc + Redis + Postgres + Kafka + 网关，配 Micrometer / OpenTelemetry 链路追踪，演示水平扩展与压测。
 
 ---

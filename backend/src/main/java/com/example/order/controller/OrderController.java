@@ -3,6 +3,8 @@ package com.example.order.controller;
 import com.example.order.dto.OrderCreateRequest;
 import com.example.order.dto.OrderResponse;
 import com.example.order.dto.OrderWithPromotion;
+import com.example.order.exception.IdempotencyConflictException;
+import com.example.order.service.IdempotencyService;
 import com.example.order.service.OrderService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -16,13 +18,43 @@ import java.util.List;
 public class OrderController {
 
     private final OrderService orderService;
+    private final IdempotencyService idempotencyService;
 
-    public OrderController(OrderService orderService) {
+    public OrderController(OrderService orderService, IdempotencyService idempotencyService) {
         this.orderService = orderService;
+        this.idempotencyService = idempotencyService;
     }
 
     @PostMapping
-    public ResponseEntity<OrderWithPromotion> createOrder(@Valid @RequestBody OrderCreateRequest request) {
+    public ResponseEntity<OrderWithPromotion> createOrder(
+            @RequestHeader(value = IdempotencyService.IDEMPOTENCY_HEADER, required = false) String idempotencyKey,
+            @Valid @RequestBody OrderCreateRequest request) {
+
+        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+            IdempotencyService.Outcome outcome = idempotencyService.checkAndReserve(idempotencyKey);
+            if (outcome == IdempotencyService.Outcome.HIT) {
+                // A previous attempt already completed -> replay the stored response.
+                return ResponseEntity.ok(idempotencyService.getCached(idempotencyKey));
+            }
+            if (outcome == IdempotencyService.Outcome.IN_PROGRESS) {
+                // Another in-flight request owns this key -> client must not double-submit.
+                throw new IdempotencyConflictException(idempotencyKey);
+            }
+            // PROCEED: this request owns the key. On any failure, release it so the
+            // client can safely retry with the same key (no order was persisted).
+            try {
+                OrderWithPromotion response = orderService.createOrder(request);
+                idempotencyService.complete(idempotencyKey, response);
+                return ResponseEntity
+                        .created(URI.create("/api/orders/" + response.getOrder().getId()))
+                        .body(response);
+            } catch (Exception e) {
+                idempotencyService.fail(idempotencyKey);
+                throw e;
+            }
+        }
+
+        // No Idempotency-Key supplied -> plain create (no replay guarantee).
         OrderWithPromotion response = orderService.createOrder(request);
         return ResponseEntity
                 .created(URI.create("/api/orders/" + response.getOrder().getId()))
