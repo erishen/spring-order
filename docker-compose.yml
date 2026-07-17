@@ -1,0 +1,45 @@
+# Postgres for the order-platform `postgres` profile, plus Redis for the P1
+# distributed lock + cache (`redis` profile).
+#
+# Minimal (P0 only, just the DB):
+#   docker compose up -d db
+#
+# Full P1 multi-instance stack (Redis + Postgres):
+#   docker compose up -d
+# Then run 2+ backend instances, all pointing at the same Redis + Postgres:
+#   mvn -o spring-boot:run -Dspring-boot.run.arguments="--server.port=8080 --spring.profiles.active=redis,postgres"
+#   mvn -o spring-boot:run -Dspring-boot.run.arguments="--server.port=8081 --spring.profiles.active=redis,postgres"
+#
+# Env vars here match backend/src/main/resources/application-{postgres,redis}.yml
+# (ORDER_DB_USER / ORDER_DB_PASSWORD / ORDER_DB_URL / REDIS_HOST / REDIS_PORT).
+services:
+  db:
+    image: postgres:16
+    container_name: order-platform-db
+    environment:
+      POSTGRES_DB: orderdb
+      POSTGRES_USER: order
+      POSTGRES_PASSWORD: order
+    ports:
+      - "5432:5432"
+    volumes:
+      - order-platform-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U order -d orderdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    container_name: order-platform-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  order-platform-pgdata:

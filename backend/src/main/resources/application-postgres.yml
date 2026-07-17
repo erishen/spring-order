@@ -1,0 +1,20 @@
+# Activate with: mvn spring-boot:run -Dspring-boot.run.arguments="--server.port=8080 --spring.profiles.active=postgres"
+# (requires a running Postgres; see docker-compose.yml at the project root)
+spring:
+  config:
+    activate:
+      on-profile: postgres
+  datasource:
+    url: ${ORDER_DB_URL:jdbc:postgresql://localhost:5432/orderdb}
+    username: ${ORDER_DB_USER:order}
+    password: ${ORDER_DB_PASSWORD:order}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  flyway:
+    enabled: true
+    locations: classpath:db/migration

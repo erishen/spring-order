@@ -1,0 +1,31 @@
+# ---- Build / dependency caches ----
+backend/target/
+backend/.settings/
+frontend/node_modules/
+frontend/dist/
+dist/
+build/
+out/
+
+# ---- Logs ----
+*.log
+
+# ---- Env / secrets (keep .example) ----
+.env
+.env.*
+!.env.example
+
+# ---- IDE ----
+.idea/
+*.iml
+.vscode/
+.project
+.classpath
+.settings/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# ---- Keep MSW service worker (required at runtime) ----
+!frontend/public/mockServiceWorker.js

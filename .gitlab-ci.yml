@@ -1,0 +1,42 @@
+stages:
+  - test
+  - coverage-gate
+  - build
+
+variables:
+  MAVEN_OPTS: "-Dmaven.repo.local=.m2/repository"
+
+# Q8: CI Pipeline with coverage gate
+unit-test:
+  stage: test
+  image: maven:3.9-eclipse-temurin-17
+  script:
+    - cd backend
+    - mvn clean test jacoco:report
+  artifacts:
+    when: always
+    reports:
+      junit: backend/target/surefire-reports/*.xml
+    paths:
+      - backend/target/site/jacoco/
+
+coverage-gate:
+  stage: coverage-gate
+  image: maven:3.9-eclipse-temurin-17
+  script:
+    - cd backend
+    - mvn jacoco:check
+    - echo "Coverage threshold passed (>= 80%)"
+  only:
+    - merge_requests
+    - main
+
+frontend-build:
+  stage: build
+  image: node:20-alpine
+  script:
+    - cd frontend
+    - npm ci
+    - npm run build
+  only:
+    - main

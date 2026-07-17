@@ -1,0 +1,16 @@
+# Activate with: --spring.profiles.active=redis
+# For multi-instance (P1 target), combine with postgres:
+#   --spring.profiles.active=redis,postgres
+# Requires a running Redis; see docker-compose.yml at the project root (service `redis`).
+spring:
+  config:
+    activate:
+      on-profile: redis
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  cache:
+    type: redis
+    redis:
+      time-to-live: 5m
