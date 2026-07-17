@@ -55,3 +55,30 @@ resilience4j:
         ignore-exceptions:
           - com.example.order.exception.InsufficientStockException
           - com.example.order.exception.IdempotencyConflictException
+
+# ---- P4: Observability (Actuator + Prometheus) ----
+# Exposed for the multi-instance demo: health checks back the nginx upstream,
+# prometheus metrics feed the monitoring stack (see docker-compose + prometheus.yml).
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  # Redis 健康指示器由 classpath 上的 data-redis 自动注册（与 RedisConfig 的
+  # @ConditionalOnProperty 无关），无 Redis 时恒 ping 失败 → 顶层 health 误报 DOWN。
+  # 默认关闭，仅 redis profile 启用（见 application-redis.yml）。
+  health:
+    redis:
+      enabled: false
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  metrics:
+    tags:
+      application: order-platform

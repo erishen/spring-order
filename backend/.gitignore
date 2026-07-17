@@ -1,5 +1,7 @@
 target/
-data/                       # embedded H2 file DB (generated at runtime)
+# embedded H2 file DB (generated at runtime)
+data/
+*.mv.db
 !.mvn/wrapper/maven-wrapper.jar
 *.class
 *.jar

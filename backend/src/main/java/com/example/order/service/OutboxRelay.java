@@ -13,6 +13,7 @@ import org.springframework.kafka.support.SendResult;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -56,6 +57,7 @@ public class OutboxRelay {
     }
 
     /** Visible for direct invocation from tests. */
+    @Transactional
     public void publishPending() {
         List<OutboxEvent> pending = repository.findByStatusOrderByIdAsc(OutboxStatus.PENDING);
         for (OutboxEvent event : pending) {

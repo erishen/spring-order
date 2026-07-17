@@ -14,3 +14,9 @@ spring:
     type: redis
     redis:
       time-to-live: 5m
+
+# 启用 Redis 健康指示器（默认 application.yml 已关闭，避免无 Redis 时 health 误报 DOWN）
+management:
+  health:
+    redis:
+      enabled: true
