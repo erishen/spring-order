@@ -12,10 +12,10 @@
     </parent>
 
     <groupId>com.example</groupId>
-    <artifactId>order-platform</artifactId>
+    <artifactId>spring-order</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>order-platform</name>
-    <description>Order Platform - Interview Demo</description>
+    <name>spring-order</name>
+    <description>Spring Order - Interview Demo</description>
 
     <properties>
         <java.version>17</java.version>

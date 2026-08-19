@@ -25,6 +25,6 @@ public class InstanceInfoContributor implements InfoContributor {
             // fall through to "unknown"
         }
         builder.withDetail("instanceId", host);
-        builder.withDetail("app", "order-platform");
+        builder.withDetail("app", "spring-order");
     }
 }

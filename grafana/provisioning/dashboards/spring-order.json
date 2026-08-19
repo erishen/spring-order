@@ -1,0 +1,76 @@
+{
+  "uid": "spring-order",
+  "title": "Spring Order · P4 Observability",
+  "description": "Request throughput per replica — demonstrates the nginx gateway spreading load across order-svc-1 / order-svc-2.",
+  "tags": ["spring-order", "p4"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-15m", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "editable": true,
+  "panels": [
+    {
+      "id": 1,
+      "title": "请求吞吐 (by instance)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 14, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 12, "pointSize": 0 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean"] } },
+      "targets": [
+        {
+          "expr": "sum by (instance) (rate(http_server_requests_seconds_count[1m]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "总请求数",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 10, "x": 14, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        { "expr": "sum(http_server_requests_seconds_count)", "refId": "A" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "错误率 (5xx, by instance)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 12 },
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.01 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "sum by (instance) (rate(http_server_requests_seconds_count{status=~\"5..\"}[1m])) / sum by (instance) (rate(http_server_requests_seconds_count[1m]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

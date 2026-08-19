@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/orders")
@@ -71,5 +72,14 @@ public class OrderController {
     public ResponseEntity<List<OrderResponse>> getAllOrders() {
         List<OrderResponse> responses = orderService.getAllOrders();
         return ResponseEntity.ok(responses);
+    }
+
+    /** 清空所有演示数据：订单 + Outbox 事件 + 幂等键 + 消费者投影。 */
+    @DeleteMapping
+    public ResponseEntity<Map<String, Object>> clearAll() {
+        long removed = orderService.clearAll();
+        return ResponseEntity.ok(Map.of(
+                "removed", removed,
+                "message", "已清空订单、Outbox 事件、幂等键与消费者投影"));
     }
 }

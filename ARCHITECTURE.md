@@ -1,7 +1,7 @@
-# Order Platform · 架构文档（ARCHITECTURE）
+# Spring Order · 架构文档（ARCHITECTURE）
 
 > 本文聚焦**设计、结构、数据流与关键决策**；运行方式、API 参数、促销规则等使用层内容见 [`README.md`](./README.md)。
-> 项目定位：面试演示用的「订单 + 促销规则」后端，正逐步演进为**高并发分布式订单平台**（P0→P4）。
+> 项目定位：「订单 + 促销规则」后端，正逐步演进为**高并发分布式订单平台**（P0→P4）。
 
 ---
 
@@ -189,7 +189,7 @@ sequenceDiagram
 | `inventory` | `stock_id`(PK) · `available` · `version` | `@Version` 乐观锁字段，并发扣减重试而非超卖 |
 | `idempotency_keys` | `idempotency_key`(唯一) · `status`(IN_PROGRESS/COMPLETED) · `response_body` | 幂等表，零外部依赖，DB 级去重 |
 | `outbox_events` | `aggregate_type` · `aggregate_id` · `event_type` · `payload`(TEXT) · `status`(PENDING/PUBLISHED) · `created_at` · `published_at` | 事务发件箱；`payload` 由 `@Lob` 改为 `TEXT`（规避 auto-commit 下 Large Object 不可读） |
-| `users` | `id` · `name` · `email` | 5 个预置演示用户 |
+| `users` | `id` · `name` · `email` | 5 个预置示例用户 |
 
 ---
 
@@ -214,7 +214,7 @@ Redis 可选；仅在 `redis` profile 启用 `@EnableCaching` + `RedisCacheManag
 
 ### 7.4 可观测（P4）
 
-- `/actuator/prometheus` 暴露 JVM / HTTP / Resilience4j 指标；`InstanceInfoContributor` 暴露 `instanceId`（副本主机名）演示网关轮询。
+- `/actuator/prometheus` 暴露 JVM / HTTP / Resilience4j 指标；`InstanceInfoContributor` 暴露 `instanceId`（副本主机名）展示网关轮询。
 - `prometheus/prometheus.yml` 分别抓 `order-svc-1:8080` / `order-svc-2:8080`，Grafana 按 `instance` 标签拆分，直观看流量摊到两副本。
 
 ### 7.5 优雅降级（Profile 驱动）
@@ -237,7 +237,7 @@ Redis 可选；仅在 `redis` profile 启用 `@EnableCaching` + `RedisCacheManag
 | 幂等存储 | **DB 表**而非 Redis | 与锁/缓存解耦；Redis 抖动不影响幂等正确性，零外部依赖即可验证 |
 | 事件投递 | **事务发件箱**而非事务消息 / 双写 | 「落库 + 发消息」原子，at-least-once + 下游幂等，杜绝不一致 |
 | 库存并发 | **乐观锁 + Redis 锁双保险** | 乐观锁保底不超卖；Redis 锁跨实例串行化、降重试风暴；取不到锁降级仍安全 |
-| 网关 | **nginx 开源版** | 仅被动健康检查（无主动探活），对演示足够；若要主动健康检查需 NGINX Plus / 另配 |
+| 网关 | **nginx 开源版** | 仅被动健康检查（无主动探活），对当前场景足够；若要主动健康检查需 NGINX Plus / 另配 |
 | 健康检查 | 默认关 `redis` 指示器 | 避免无中间件时 health 误 DOWN |
 | Kafka 镜像 | `apache/kafka` 而非 `bitnami/kafka` | 本机 CN 镜像源只代理 Docker Hub `library/*`，`bitnami/*` 拉不到；`apache/*` 经全量代理可达 |
 | 监控镜像 | 固定 tag（`v2.53.1` / `11.2.0`） | `latest` 在受限网络拉取超时，pin 版本更稳 |

@@ -18,17 +18,36 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  createOrder: (data: import('../types').OrderCreateRequest) =>
-    request<{ order: import('../types').OrderResponse; promotion: import('../types').PromotionResult }>('/api/orders', {
+  createOrder: async (
+    data: import('../types').OrderCreateRequest,
+    idempotencyKey?: string,
+  ): Promise<import('../types').CreateOrderResult> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+    const res = await fetch(`${API_BASE_URL}/api/orders`, {
       method: 'POST',
       body: JSON.stringify(data),
-    }),
+      headers,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw { status: res.status, ...body };
+    return { ...body, httpStatus: res.status };
+  },
 
   getOrders: () =>
     request<import('../types').OrderResponse[]>('/api/orders'),
 
+  deleteOrders: () =>
+    request<{ removed: number; message: string }>('/api/orders', { method: 'DELETE' }),
+
   getEvents: () =>
     request<import('../types').EventView[]>('/api/events'),
+
+  getKafkaStatus: () =>
+    request<import('../types').KafkaStatus>('/api/kafka/status'),
+
+  getConsumerProjection: () =>
+    request<import('../types').ConsumerProjection>('/api/consumer/projection'),
 
   getUsers: () =>
     request<import('../types').User[]>('/api/users'),

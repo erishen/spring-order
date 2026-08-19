@@ -17,5 +17,9 @@ public interface OutboxRepository extends JpaRepository<OutboxEvent, String> {
     /** Most-recently-published events first (for the UI event stream). */
     List<OutboxEvent> findTop20ByStatusOrderByIdDesc(OutboxStatus status);
 
+    /** Most-recent events (both PENDING and PUBLISHED) first, ordered by createdAt DESC
+     *  (true time order); id DESC is a stable tiebreaker for same-second events. */
+    List<OutboxEvent> findTop20ByOrderByCreatedAtDescIdDesc();
+
     Optional<OutboxEvent> findByAggregateIdAndEventType(String aggregateId, String eventType);
 }

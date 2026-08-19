@@ -26,6 +26,30 @@ export interface EventView {
   publishedAt: string | null;
 }
 
+export interface KafkaStatus {
+  configured: boolean;
+  connected: boolean;
+  bootstrapServers: string;
+  internalBootstrapServers: string;
+}
+
+export interface ConsumedOrder {
+  orderId: string;
+  userId: string;
+  amount: string | null;
+  discount: string | null;
+  finalAmount: string | null;
+  status: string | null;
+  consumedAt: string | null;
+}
+
+export interface ConsumerProjection {
+  totalConsumed: number;
+  lastConsumedAt: string | null;
+  recentOrders: ConsumedOrder[];
+  consumedOrderIds: string[];
+}
+
 export interface InstanceInfo {
   app?: string;
   instanceId?: string;
@@ -48,4 +72,8 @@ export interface PromotionResult {
 export interface OrderWithPromotion {
   order: OrderResponse;
   promotion: PromotionResult;
+}
+
+export interface CreateOrderResult extends OrderWithPromotion {
+  httpStatus: number;
 }

@@ -61,4 +61,9 @@ public class OutboxService {
             repository.save(row);
         });
     }
+
+    /** 清空所有 Outbox 事件（演示数据重置时与订单表一并清理）。 */
+    public void clearAll() {
+        repository.deleteAll();
+    }
 }

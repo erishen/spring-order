@@ -16,7 +16,7 @@ import java.util.function.Supplier;
  * Distributed lock backed by Redis (SET key token NX PX + Lua-atomic unlock).
  *
  * Used to serialize stock deduction for the same {@code stockId} across multiple
- * order-platform instances, cutting down on optimistic-lock retries under contention.
+ * spring-order instances, cutting down on optimistic-lock retries under contention.
  * On a single instance with no Redis this bean is simply never created (see
  * {@link ConditionalOnProperty}), and callers fall back to the DB optimistic lock.
  *

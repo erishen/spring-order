@@ -6,11 +6,11 @@ scrape_configs:
   # Both order-svc replicas expose /actuator/prometheus (P4 observability).
   # Each is tagged with its instance label so Grafana can break metrics down
   # per replica and you can see the load being spread by the nginx gateway.
-  - job_name: 'order-platform'
+  - job_name: 'spring-order'
     metrics_path: '/actuator/prometheus'
     static_configs:
       - targets:
           - 'order-svc-1:8080'
           - 'order-svc-2:8080'
         labels:
-          service: 'order-platform'
+          service: 'spring-order'

@@ -14,7 +14,7 @@ public class PromotionService {
     private static final BigDecimal FULL_REDUCTION_DISCOUNT = BigDecimal.valueOf(20);
 
     /**
-     * Q6: 促销规则
+     *  促销规则
      * Rule 1: 新用户首单 -10
      * Rule 2: 订单 >= 100, -20
      * Rule 3: 不可叠加，满减优先

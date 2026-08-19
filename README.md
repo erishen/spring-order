@@ -1,6 +1,6 @@
-# Order Platform
+# Spring Order
 
-> Interview demo project — order management + promotion rules, gradually evolving into a **high-concurrency distributed order platform**.
+> An order management + promotion-rules platform, gradually evolving into a **high-concurrency distributed order platform**.
 > Backend: Spring Boot + Spring Data JPA (Flyway migrations, `@Version` optimistic lock on inventory; embedded H2 by default, switchable to Postgres). Frontend: React/Vite.
 >
 > 中文文档见 [README.zh.md](./README.zh.md)。架构设计与数据流详见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
@@ -25,11 +25,11 @@
 
 ## 1. Overview
 
-`order-platform` demonstrates typical backend business scenarios and **progressively evolves toward a distributed, high-concurrency architecture**: order placement, promotion-rule calculation, user listing, order queries, and inventory reservation.
+`spring-order` demonstrates typical backend business scenarios and **progressively evolves toward a distributed, high-concurrency architecture**: order placement, promotion-rule calculation, user listing, order queries, and inventory reservation.
 
 **P0** established the persistence foundation: data is stored via Spring Data JPA (embedded H2 file DB by default — zero external dependencies, survives restarts; switchable to real Postgres via the `postgres` profile), Flyway manages the schema, and inventory deduction uses the `inventory` table + `@Version` optimistic lock to eliminate overselling at the database level.
 
-Key capabilities demonstrated:
+Key capabilities:
 
 - Order flow + business rules (promotion / inventory validation)
 - Unified front/back response contract (`{ order, promotion }` envelope)
@@ -61,7 +61,7 @@ Key capabilities demonstrated:
 ## 3. Project Structure
 
 ```
-order-platform/
+spring-order/
 ├── Makefile                 # Wrapped commands (install / run / test / ci ...)
 ├── docker-compose.yml       # Full stack: order-svc replicas + redis + postgres + kafka + nginx + prometheus + grafana
 ├── backend/                 # Spring Boot backend
@@ -111,7 +111,7 @@ order-platform/
 ### Prerequisites
 
 - Java 17+, Maven 3.8+
-- Node 18+ (22 recommended)
+- Node 24+
 - Docker / OrbStack (only for the full-stack / Postgres / Redis / Kafka paths)
 
 ### Run the backend
@@ -135,7 +135,7 @@ npm run dev          # Vite, default port 3000, /api proxied to 8080
 
 Open **http://localhost:3000**.
 
-> In **DEV mode the frontend runs against MSW mocks by default** — the UI is self-contained and demonstrates data without a backend. To hit the real backend, disable MSW (see [§8](#8-frontend-mock-msw)) or set `VITE_API_BASE_URL`.
+> By default the frontend talks to the real backend through the Vite proxy (`/api` → `:8080`). To run the UI **without a backend**, use `VITE_ENABLE_MOCK=true` (see [§8](#8-frontend-mock-msw)).
 
 ### One command (Makefile)
 
@@ -323,10 +323,13 @@ cd frontend && npx vite --port 3001
 
 ## 8. Frontend Mock (MSW)
 
-`src/main.tsx` starts the MSW Worker under `import.meta.env.DEV`, intercepting `/api/*` with mock data so the UI **demonstrates without a backend**. The mocked promotion semantics match the backend (≥100 → −20 priority; new user → −10).
+MSW is **off by default** — the frontend talks to the real backend through the Vite proxy (`/api` → `:8080`), so orders are actually persisted and idempotency/Outbox work for real. To run the UI **without a backend**, start the frontend with `VITE_ENABLE_MOCK=true`:
 
-- To hit the real backend: temporarily disable MSW (remove the `worker.start(...)` call in `main.tsx`), or set `VITE_API_BASE_URL=http://localhost:8080` and bypass the mock.
-- `onUnhandledRequest: 'bypass'` is configured, so requests not covered by the mock still go to the network (via the Vite proxy to 8080).
+```bash
+cd frontend && VITE_ENABLE_MOCK=true npx vite
+```
+
+`src/main.tsx` then starts the MSW Worker (under `import.meta.env.DEV && VITE_ENABLE_MOCK === 'true'`), intercepting `/api/*` with mock data. The mocked promotion semantics match the backend (≥100 → −20 priority; new user → −10). `onUnhandledRequest: 'bypass'` is configured, so requests not covered by the mock still go to the network.
 
 ---
 
@@ -347,7 +350,7 @@ Coverage includes: successful order (201), new-user derivation, threshold-priori
 
 ## 10. Architecture Evolution (distributed direction)
 
-`order-platform` is evolving from a single-instance demo into a **high-concurrency distributed order platform**. Each pain point maps to an evolution stage:
+`spring-order` is evolving from a single-instance application into a **high-concurrency distributed order platform**. Each pain point maps to an evolution stage:
 
 | Current shape | Distributed target | Stage |
 |---------------|--------------------|-------|
@@ -405,7 +408,7 @@ Decouples order placement from downstream (inventory/payment/notify/audit) and g
 - **Transactional Outbox**: `OrderService.createOrder` writes an `OrderCreated` event to `outbox_events` in the **same DB transaction** as the `orders` row. State update and event enqueue can never diverge — both succeed or both roll back.
 - **Relay (OutboxRelay)**: a `@ConditionalOnProperty(spring.kafka.bootstrap-servers)` scheduled task (`fixedDelay` 1s) scans `PENDING` rows, sends each via `kafkaTemplate.send` to `order-events`, then `markPublished` (REQUIRES_NEW). **at-least-once**: if the relay crashes between send-success and mark-published, the event is resent next poll — so **downstream must be idempotent** (ties back to P2's `Idempotency-Key`). Failed sends stay `PENDING` and retry; events are never lost, even if Kafka is briefly down.
 - **Graceful degradation (key)**: Kafka is **optional**. Enabled only under the `kafka` profile; without a broker these beans are never created and `outbox_events` rows simply stay `PENDING` (replayed once a broker exists) — **runs and tests with zero dependencies**.
-- **Sample consumer**: `OrderEventLogger` (`@KafkaListener` printing `order-events`) is a demo sink. Real scenarios drive fulfillment, notifications, read-model updates — all keyed by `orderId`.
+- **Sample consumer**: `OrderEventLogger` (`@KafkaListener` printing `order-events`) is a sample sink. Real scenarios drive fulfillment, notifications, read-model updates — all keyed by `orderId`.
 - **Enable** (needs local Docker):
   ```bash
   docker compose up -d
@@ -413,12 +416,12 @@ Decouples order placement from downstream (inventory/payment/notify/audit) and g
   mvn -o spring-boot:run -Dspring-boot.run.arguments="--server.port=8081 --spring.profiles.active=redis,postgres,kafka"
   ```
 
-### P4 · Multi-instance demo: gateway + monitoring
+### P4 · Multi-instance deployment: gateway + monitoring
 
 Wires all P0–P3 capabilities under truly multiple instances, demonstrating horizontal scaling and observability:
 
 - **Multi-instance + gateway**: `docker-compose.yml` brings up **2 order-svc replicas** (`order-svc-1` / `order-svc-2`) sharing the same Redis + Postgres + Kafka, fronted by an **nginx gateway** (`conf/nginx.conf`) doing round-robin LB on a single `:80` entry. `backend/Dockerfile` builds the multi-stage image; `docker compose up -d --build` starts the full stack.
-- **Frontend UI container**: `frontend/` is containerized — `frontend/Dockerfile` serves pre-built `dist` via nginx and reverse-proxies `/api` and `/actuator` to the gateway (same-origin, no CORS). A `frontend` service (default `:18083`, avoiding local 80/3000 clashes) exposes the full UI demoing P1–P4: order page (form + list, list via Redis `@Cacheable`), users page, and **runtime page (`/status`)** — showing the responding replica (`/actuator/info` `instanceId`, alternating across replicas on refresh), HTTP metrics (parsed from `/actuator/prometheus`), and the recent Kafka order event stream (`GET /api/events`).
+- **Frontend UI container**: `frontend/` is containerized — `frontend/Dockerfile` serves pre-built `dist` via nginx and reverse-proxies `/api` and `/actuator` to the gateway (same-origin, no CORS). A `frontend` service (default `:18083`, avoiding local 80/3000 clashes) exposes the full UI covering P1–P4: order page (form + list, list via Redis `@Cacheable`), users page, and **runtime page (`/status`)** — showing the responding replica (`/actuator/info` `instanceId`, alternating across replicas on refresh), HTTP metrics (parsed from `/actuator/prometheus`), and the recent Kafka order event stream (`GET /api/events`).
 - **Observability**: Actuator + Micrometer expose `/actuator/prometheus`; `prometheus/prometheus.yml` scrapes both replicas, `grafana/provisioning` injects the Prometheus datasource (admin/admin). Targets show both replicas scraped separately; Grafana splits by instance label, visualizing traffic spread across replicas.
 - **Health-check pitfall (fixed)**: `spring-boot-starter-data-redis` on the classpath auto-registers `RedisReactiveHealthIndicator` **regardless of** `RedisConfig`'s `@ConditionalOnProperty` — without Redis it pings `localhost:6379` and fails, falsely reporting `/actuator/health` as `DOWN`. Fixed by disabling `management.health.redis.enabled` by default, enabling it only under the `redis` profile.
 - **Degradation unchanged**: P4 only adds orchestration + monitoring, not runtime-contract changes. Replicas connect to middleware only under `redis,postgres,kafka`; nginx passive health check (3 fails → evict 30s) keeps traffic flowing if a replica dies; Actuator exposes only `health`/`info`/`prometheus` (see [§11](#11-security-hardening)).
@@ -427,7 +430,7 @@ Wires all P0–P3 capabilities under truly multiple instances, demonstrating hor
 
 ## 11. Security Hardening
 
-This is an interview demo that defaults to "runnable with zero config", but the following hardening avoids committing secrets or exposing unnecessary endpoints:
+This project defaults to "runnable with zero config", but the following hardening avoids committing secrets or exposing unnecessary endpoints:
 
 - **No secrets in repo**: `docker-compose.yml` credentials (`POSTGRES_PASSWORD` / `ORDER_DB_PASSWORD`) and Grafana admin (`GF_SECURITY_ADMIN_*`) use `${VAR:-default}` interpolation. Real values live in the root `.env` (git-ignored); template in `.env.example` (committed). Zero-config `docker compose up -d --build` still works with defaults.
 - **H2 console off by default**: `application.yml` sets `spring.h2.console.enabled: false`; only the local `dev` profile (`application-dev.yml`) enables it. Container/prod deployments override via `SPRING_PROFILES_ACTIVE` and never activate `dev`, keeping the H2 console closed.
@@ -435,7 +438,7 @@ This is an interview demo that defaults to "runnable with zero config", but the 
 - **CORS**: `WebConfig` allows only `localhost:5173` / `localhost:3000`; not the `*` + `allowCredentials` dangerous combination.
 - **No error-info leakage**: `OrderNotFoundException` message omits the order id; `404` does not reveal resource existence.
 
-> Note: `admin/admin` for Grafana and `order`/`order` are localhost demo defaults, not real secrets. Before publishing the repo, put real passwords in `.env` and never hardcode them in compose.
+> Note: `admin/admin` for Grafana and `order`/`order` are localhost defaults, not real secrets. Before publishing the repo, put real passwords in `.env` and never hardcode them in compose.
 
 ---
 

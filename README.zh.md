@@ -1,6 +1,6 @@
-# Order Platform · 订单平台
+# Spring Order · 订单平台
 
-> 面试演示项目（Interview Demo）— 订单管理 + 促销规则演示，并正逐步演进为「高并发分布式订单平台」。
+> 订单管理 + 促销规则平台，正逐步演进为「高并发分布式订单平台」。
 > 后端 Spring Boot + Spring Data JPA（Flyway 迁移、库存 `@Version` 乐观锁，默认内嵌 H2、可切 Postgres）；前端 React/Vite。
 >
 > English documentation: see [README.md](./README.md). 架构设计与数据流详见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
@@ -25,11 +25,11 @@
 
 ## 1. 项目简介
 
-`order-platform` 是一个用于演示典型后端业务场景、并**逐步向高并发分布式架构演进**的项目：下单、促销规则计算、用户列表、订单查询、库存预留。
+`spring-order` 覆盖典型后端业务场景，并**逐步向高并发分布式架构演进**：下单、促销规则计算、用户列表、订单查询、库存预留。
 
 **P0 阶段已落地持久化地基**：数据通过 Spring Data JPA 落库（默认内嵌 H2 文件库、零外部依赖、重启不丢；亦可通过 `postgres` profile 切真实 Postgres），Flyway 管理表结构，库存扣减走 `inventory` 表 + `@Version` 乐观锁，从数据库层杜绝并发超卖。
 
-重点演示的能力：
+核心能力：
 
 - 下单流程 + 业务规则（促销 / 库存校验）
 - 前后端**统一响应契约**（`{ order, promotion }` 信封）
@@ -61,7 +61,7 @@
 ## 3. 目录结构
 
 ```
-order-platform/
+spring-order/
 ├── Makefile                 # 常用命令封装（install / run / test / ci ...）
 ├── docker-compose.yml       # 全栈编排：order-svc 副本 + redis + postgres + kafka + nginx + prometheus + grafana
 ├── backend/                 # Spring Boot 后端
@@ -111,7 +111,7 @@ order-platform/
 ### 前置要求
 
 - Java 17+、Maven 3.8+
-- Node 18+（推荐 22）
+- Node 24+
 - Docker / OrbStack（仅全栈 / Postgres / Redis / Kafka 路径需要）
 
 ### 启动后端
@@ -135,8 +135,7 @@ npm run dev          # Vite，默认端口 3000，/api 代理到 8080
 
 浏览器打开 **http://localhost:3000**。
 
-> 前端在 **开发模式（DEV）默认走 MSW Mock**，UI 自包含、无需后端即可浏览演示数据。
-> 若要对接真实后端，关闭 MSW（见 [§8](#8-前端-mockmsw)）或设置 `VITE_API_BASE_URL`。
+> 前端默认经 Vite 代理直连真实后端（`/api` → `:8080`）。要不依赖后端跑纯前端 UI，用 `VITE_ENABLE_MOCK=true`（见 [§8](#8-前端-mockmsw)）。
 
 ### 一条命令（Makefile）
 
@@ -262,7 +261,7 @@ GET /api/events        # 最近已发布（PUBLISHED）的 outbox 事件，最�
 ### 5.6 运行态信息（P4）
 
 ```
-GET /actuator/info        # 含 instanceId（当前响应副本主机名），演示网关轮询
+GET /actuator/info        # 含 instanceId（当前响应副本主机名），展示网关轮询
 GET /actuator/prometheus  # 原始指标文本，前端解析 HTTP 请求数 / 延迟 / 熔断调用
 ```
 
@@ -330,12 +329,13 @@ cd frontend && npx vite --port 3001
 
 ## 8. 前端 Mock（MSW）
 
-`src/main.tsx` 在 `import.meta.env.DEV` 下启动 MSW Worker，开发态默认拦截 `/api/*` 返回模拟数据，
-UI 因此**无需后端也能独立演示**。Mock 的促销语义与后端保持一致（满 100 减 20 优先、新用户减 10）。
+MSW **默认关闭**——前端经 Vite 代理直连真实后端（`/api` → `:8080`），订单才会真正持久化、幂等/Outbox 才真实工作。要**不依赖后端**跑纯前端 UI，用 `VITE_ENABLE_MOCK=true` 启动：
 
-- 想对接真实后端：临时禁用 MSW（去掉 `main.tsx` 中 `worker.start(...)` 调用），或设置环境变量
-  `VITE_API_BASE_URL=http://localhost:8080`，并让请求绕过 Mock。
-- `onUnhandledRequest: 'bypass'` 已配置，未被 Mock 覆盖的请求会正常发往网络（经 Vite 代理到 8080）。
+```bash
+cd frontend && VITE_ENABLE_MOCK=true npx vite
+```
+
+`src/main.tsx` 此时（`import.meta.env.DEV && VITE_ENABLE_MOCK === 'true'`）才启动 MSW Worker 拦截 `/api/*` 返回模拟数据。Mock 的促销语义与后端一致（满 100 减 20 优先、新用户减 10）；`onUnhandledRequest: 'bypass'` 已配置，未被 Mock 覆盖的请求仍走网络。
 
 ---
 
@@ -356,7 +356,7 @@ make ci                      # = test + coverage-check（模拟 CI 流水线）
 
 ## 10. 架构演进（分布式方向）
 
-`order-platform` 正从单实例演示演进为**高并发分布式订单平台**。当前痛点与演进目标一一对应：
+`spring-order` 正从单实例演进为**高并发分布式订单平台**。当前痛点与演进目标一一对应：
 
 | 当前形态 | 分布式目标 | 落地阶段 |
 |----------|------------|----------|
@@ -380,7 +380,7 @@ make ci                      # = test + coverage-check（模拟 CI 流水线）
 
 ### P1 · Redis 分布式锁 + 缓存（当前已落地）
 
-让 order-platform 从「单实例」走向「多实例无状态横向扩容」：
+让 spring-order 从「单实例」走向「多实例无状态横向扩容」：
 
 - **分布式锁**：新增 `RedisLockService`（SET `lock:{stockId}` NX PX + Lua 原子解锁）。`OrderService.reserveWithRetry` 在 Redis 可用时，用锁把同一 `stockId` 的库存扣减串行化，跨实例消除乐观锁重试风暴；未获取锁时降级为直接执行（DB 乐观锁仍兜底，不超卖）。Lua 解锁只在 token 仍匹配时删 key，避免误删他人锁。
 - **缓存**：`RedisConfig`（`@ConditionalOnProperty(spring.data.redis.host)` + `@EnableCaching`）配 `RedisCacheManager`（JSON 序列化、5min TTL）。`OrderService.getOrder` / `getAllOrders` 加 `@Cacheable`，`createOrder` 加 `@CacheEvict(orders-all)`——热订单查询走 Redis，降 DB 压力。
@@ -422,12 +422,12 @@ make ci                      # = test + coverage-check（模拟 CI 流水线）
   mvn -o spring-boot:run -Dspring-boot.run.arguments="--server.port=8081 --spring.profiles.active=redis,postgres,kafka"
   ```
 
-### P4 · 多实例演示：网关 + 监控（当前已落地）
+### P4 · 多实例部署：网关 + 监控（当前已落地）
 
-把 P0–P3 的所有能力在「真正多实例」下串起来，演示水平扩展与可观测性：
+把 P0–P3 的所有能力在「真正多实例」下串起来，展示水平扩展与可观测性：
 
 - **多实例 + 网关**：根目录 `docker-compose.yml` 一键拉起 **2 个 order-svc 副本**（`order-svc-1` / `order-svc-2`），共享同一 Redis + Postgres + Kafka（对应 P1 锁/缓存、P0 持久化、P3 Outbox），前面由 **nginx 网关**（`conf/nginx.conf`）轮询负载均衡，对外单一入口 `:80`。`backend/Dockerfile` 多阶段镜像化，`docker compose up -d --build` 起全栈。
-- **前端 UI 容器**：`frontend/` 已容器化——`frontend/Dockerfile` 用 nginx 托管预编译 `dist`，并把 `/api` 与 `/actuator` 反代到网关（同源、无 CORS）。全栈起来后多一个 `frontend` 服务（默认 `:18083`，避开本机 80/3000 冲突），直接浏览器打开即可用完整 UI 演示 P1–P4：订单页（下单 + 订单列表，列表走 Redis `@Cacheable`）、用户页、**运行态页（`/status`）**——展示当前响应副本（`/actuator/info` 的 `instanceId`，多次刷新可见网关轮询到不同副本）、HTTP 指标（解析 `/actuator/prometheus`）、以及最近 Kafka 订单事件流（`GET /api/events`）。
+- **前端 UI 容器**：`frontend/` 已容器化——`frontend/Dockerfile` 用 nginx 托管预编译 `dist`，并把 `/api` 与 `/actuator` 反代到网关（同源、无 CORS）。全栈起来后多一个 `frontend` 服务（默认 `:18083`，避开本机 80/3000 冲突），直接浏览器打开即可用完整 UI 覆盖 P1–P4：订单页（下单 + 订单列表，列表走 Redis `@Cacheable`）、用户页、**运行态页（`/status`）**——展示当前响应副本（`/actuator/info` 的 `instanceId`，多次刷新可见网关轮询到不同副本）、HTTP 指标（解析 `/actuator/prometheus`）、以及最近 Kafka 订单事件流（`GET /api/events`）。
 - **可观测性**：新增 `spring-boot-starter-actuator` + `micrometer-registry-prometheus`，`/actuator/prometheus` 暴露 JVM/HTTP/Resilience4j 指标；`prometheus/prometheus.yml` 分别抓取两副本，`grafana/provisioning` 注入 Prometheus 数据源（admin/admin）。Prometheus `targets` 可见两副本被分别抓取，Grafana 按实例标签拆分，直观看到网关把流量摊到两副本。
 - **健康指示器坑（已修）**：`data-redis` 在 classpath 上会让 Spring Boot 自动注册 `RedisReactiveHealthIndicator`，**与 `RedisConfig` 的 `@ConditionalOnProperty` 无关**——无 Redis 时它恒 ping `localhost:6379` 失败，导致顶层 `/actuator/health` 误报 `DOWN`（liveness/readiness 不受影响）。已在默认 `application.yml` 关掉 `management.health.redis.enabled`，仅 `redis` profile 开启；无中间件时 health 正确为 `UP`。
 - **降级不变**：P4 只加「编排 + 监控」，不改运行时契约。副本仍只在 `redis,postgres,kafka` profile 连中间件；nginx 被动健康检查（3 次失败踢出 30s）保证单副本宕机网关仍可用；Actuator 仅暴露 health/info/prometheus（见 [§11](#11-安全加固)），供健康检查与指标抓取。
@@ -449,7 +449,7 @@ make ci                      # = test + coverage-check（模拟 CI 流水线）
 
 ## 11. 安全加固
 
-本项目为面试演示，默认以「零配置可跑」为目标，但已做以下加固，避免把敏感信息提交进仓库或暴露不必要的端点：
+本项目默认以「零配置可跑」为目标，但已做以下加固，避免把敏感信息提交进仓库或暴露不必要的端点：
 
 - **凭据不入库**：`docker-compose.yml` 中的数据库口令（`POSTGRES_PASSWORD` / `ORDER_DB_PASSWORD`）与 Grafana 管理员口令（`GF_SECURITY_ADMIN_*`）均改为 `${VAR:-默认值}` 插值。真实值放仓库根 `.env`（已被 `.gitignore` 忽略，**不会入库**）；模板见 `.env.example`（入库）。本地零配置执行 `docker compose up -d --build` 仍可用默认值直接跑。
 - **H2 控制台默认关闭**：`application.yml` 设 `spring.h2.console.enabled: false`；仅本地开发通过 `dev` profile（`application-dev.yml`）开启。容器/生产部署靠 `SPRING_PROFILES_ACTIVE` 覆盖，不会激活 `dev`，从而 H2 控制台保持关闭（避免暴露 DB 控制台端点）。
@@ -457,7 +457,7 @@ make ci                      # = test + coverage-check（模拟 CI 流水线）
 - **CORS**：`WebConfig` 仅放行 `localhost:5173` / `localhost:3000`，未使用 `*` + `allowCredentials` 的危险组合。
 - **错误信息不泄露**：`OrderNotFoundException` 消息不含订单 id；`404` 不泄露资源存在性。
 
-> 注意：`grafana` 的 admin/admin、`order`/`order` 等均为 localhost 演示默认值，并非真实密钥。仓库公开前请将真实口令写入 `.env`，不要在 compose 中硬编码。
+> 注意：`grafana` 的 admin/admin、`order`/`order` 等均为 localhost 默认值，并非真实密钥。仓库公开前请将真实口令写入 `.env`，不要在 compose 中硬编码。
 
 ---
 

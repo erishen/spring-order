@@ -7,6 +7,7 @@ import com.example.order.dto.PromotionResult;
 import com.example.order.dto.PromotionView;
 import com.example.order.exception.OrderNotFoundException;
 import com.example.order.model.Order;
+import com.example.order.repository.IdempotencyRepository;
 import com.example.order.repository.OrderRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
@@ -34,6 +35,8 @@ public class OrderService {
     private final InventoryService inventoryService;
     private final PromotionService promotionService;
     private final OutboxService outboxService;
+    private final IdempotencyRepository idempotencyRepository;
+    private final OrderProjection orderProjection;
 
     @Autowired(required = false)
     private RedisLockService lockService;
@@ -41,11 +44,15 @@ public class OrderService {
     public OrderService(OrderRepository orderRepository,
                         InventoryService inventoryService,
                         PromotionService promotionService,
-                        OutboxService outboxService) {
+                        OutboxService outboxService,
+                        IdempotencyRepository idempotencyRepository,
+                        OrderProjection orderProjection) {
         this.orderRepository = orderRepository;
         this.inventoryService = inventoryService;
         this.promotionService = promotionService;
         this.outboxService = outboxService;
+        this.idempotencyRepository = idempotencyRepository;
+        this.orderProjection = orderProjection;
     }
 
     /**
@@ -151,6 +158,22 @@ public class OrderService {
                 result.getFinalAmount(),
                 normalizeRule(result.getRule())
         );
+    }
+
+    /**
+     * 清空所有演示数据：订单表 + Outbox 事件 + 幂等键缓存 + 消费者内存投影。
+     * 用于前端「清理订单」按钮，让运行态页的事件流/消费者投影与订单列表保持一致。
+     * 注意：Kafka 中已发布的消息不会被回滚（offset 不变），消费者也不会重放。
+     */
+    @Transactional
+    @CacheEvict(cacheNames = {"orders", "orders-all"}, allEntries = true)
+    public long clearAll() {
+        long count = orderRepository.count();
+        orderRepository.deleteAll();
+        outboxService.clearAll();
+        idempotencyRepository.deleteAll();
+        orderProjection.reset();
+        return count;
     }
 
     /** Map internal rule codes to the frontend's rule keys. */

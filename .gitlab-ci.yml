@@ -6,7 +6,7 @@ stages:
 variables:
   MAVEN_OPTS: "-Dmaven.repo.local=.m2/repository"
 
-# Q8: CI Pipeline with coverage gate
+#  CI Pipeline with coverage gate
 unit-test:
   stage: test
   image: maven:3.9-eclipse-temurin-17

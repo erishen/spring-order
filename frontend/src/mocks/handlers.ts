@@ -12,6 +12,17 @@ const mockUsers = [
 
 let orderIdCounter = 1;
 
+// In-memory order store so POST + GET stay consistent in mock mode.
+const mockOrders: Array<{
+  id: string;
+  userId: string;
+  amount: number;
+  discount: number;
+  finalAmount: number;
+  status: string;
+  createdAt: string;
+}> = [];
+
 // Track which userIds have ordered before, so "new user" is derived from
 // history exactly like the backend OrderService.
 const seenUsers = new Set<string>();
@@ -67,13 +78,19 @@ export const handlers = [
     const finalPrice = Math.max(0, body.amount - discount);
     const orderId = `ORD-${String(orderIdCounter++).padStart(4, '0')}`;
 
+    const order = {
+      id: orderId,
+      userId,
+      amount: body.amount,
+      discount,
+      finalAmount: finalPrice,
+      status: 'CREATED',
+      createdAt: new Date().toISOString(),
+    };
+    mockOrders.unshift(order);
+
     return HttpResponse.json({
-      order: {
-        id: orderId,
-        userId,
-        amount: body.amount,
-        status: 'CREATED',
-      },
+      order,
       promotion: {
         originalAmount: body.amount,
         discount,
@@ -81,6 +98,10 @@ export const handlers = [
         appliedRule,
       },
     });
+  }),
+
+  http.get('/api/orders', () => {
+    return HttpResponse.json(mockOrders);
   }),
 
   http.get('/api/users', () => {
