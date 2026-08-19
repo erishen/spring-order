@@ -3,7 +3,7 @@
 > 订单管理 + 促销规则平台，正逐步演进为「高并发分布式订单平台」。
 > 后端 Spring Boot + Spring Data JPA（Flyway 迁移、库存 `@Version` 乐观锁，默认内嵌 H2、可切 Postgres）；前端 React/Vite。
 >
-> English documentation: see [README.md](./README.md). 架构设计与数据流详见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
+> 英文文档见 [README.md](./README.md)。架构设计与数据流详见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
 
 ---
 

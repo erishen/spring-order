@@ -3,7 +3,7 @@
 > An order management + promotion-rules platform, gradually evolving into a **high-concurrency distributed order platform**.
 > Backend: Spring Boot + Spring Data JPA (Flyway migrations, `@Version` optimistic lock on inventory; embedded H2 by default, switchable to Postgres). Frontend: React/Vite.
 >
-> 中文文档见 [README.zh.md](./README.zh.md)。架构设计与数据流详见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
+> Chinese documentation: [README.zh.md](./README.zh.md) · Architecture & data flow: [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ---
 
