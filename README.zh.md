@@ -462,3 +462,6 @@ make ci                      # = test + coverage-check（模拟 CI 流水线）
 ---
 
 架构设计与数据流（设计目标、部署拓扑、分层架构、核心流程时序图、数据模型、横切关注点、关键决策权衡）详见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
+
+## 相关文章
+- [分布式订单系统演进：Spring Boot + React 如何从单体到抗住高并发](https://erishen.cn/spring_order/)

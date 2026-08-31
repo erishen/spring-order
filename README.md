@@ -443,3 +443,6 @@ This project defaults to "runnable with zero config", but the following hardenin
 ---
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for design goals, deployment topology, layered backend/frontend architecture, core-flow sequence diagrams, data model, cross-cutting concerns, and key design decisions.
+
+## Related Articles
+- [Evolution of a Distributed Order System: How Spring Boot + React Survived High Concurrency from a Monolith](https://erishen.cn/spring_order-en/)
