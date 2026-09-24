@@ -68,7 +68,7 @@ dev:
 # 启动后 P1(分布式锁+缓存) 与 P4(多实例+可观测) 才会真正激活。
 dev-full:
 	@echo ">> 预检: Docker daemon 是否就绪 ..."; if ! docker info >/dev/null 2>&1; then \
-		echo "  ❌ 连不上 Docker daemon (socket /Users/erishen/.orbstack/run/docker.sock 不存在)"; \
+		echo "  ❌ 连不上 Docker daemon（请检查 DOCKER_HOST 或确认 OrbStack / Docker Desktop 已启动）"; \
 		echo "     请先启动 OrbStack（启动台/应用程序 点开 OrbStack，或终端执行 open -a OrbStack），"; \
 		echo "     待其运行状态变为「运行中」(菜单栏图标变色 / 终端 docker info 正常) 后重试。"; \
 		echo "     若你用的是 Docker Desktop 而非 OrbStack，启动它即可，socket 路径会自动生效。"; \
